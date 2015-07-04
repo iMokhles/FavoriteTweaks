@@ -356,7 +356,8 @@ SearchController *selfOrig;
 }
 
 - (void) searchBarSearchButtonClicked:(UISearchBar *)searchBar {
-    [selfOrig searchBarButtonClicked:searchBar];
+    // [selfOrig searchBarButtonClicked:searchBar];
+    return;
 }
 
 %new
@@ -515,9 +516,124 @@ SearchController *selfOrig;
 
     UIBarButtonItem *addButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action: @selector(addNewPackageForFav)];
     [self.navigationItem setRightBarButtonItem:addButton];
+
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longPressGestureRecognized:)];
+	[self.myTableView addGestureRecognizer:longPress];
+
 }
 
 #pragma mark - MBProgressHUDDelegate
+
+- (IBAction)longPressGestureRecognized:(id)sender {
+  
+  UILongPressGestureRecognizer *longPress = (UILongPressGestureRecognizer *)sender;
+  UIGestureRecognizerState state = longPress.state;
+  
+  CGPoint location = [longPress locationInView:self.myTableView];
+  NSIndexPath *indexPath = [self.myTableView indexPathForRowAtPoint:location];
+  
+  static UIView       *snapshot = nil;        ///< A snapshot of the row user is moving.
+  static NSIndexPath  *sourceIndexPath = nil; ///< Initial index path, where gesture begins.
+  
+  switch (state) {
+    case UIGestureRecognizerStateBegan: {
+      if (indexPath) {
+        sourceIndexPath = indexPath;
+        
+        UITableViewCell *cell = [self.myTableView cellForRowAtIndexPath:indexPath];
+        
+        // Take a snapshot of the selected row using helper method.
+        snapshot = [self customSnapshoFromView:cell];
+        
+        // Add the snapshot as subview, centered at cell's center...
+        __block CGPoint center = cell.center;
+        snapshot.center = center;
+        snapshot.alpha = 0.0;
+        [self.myTableView addSubview:snapshot];
+        [UIView animateWithDuration:0.25 animations:^{
+          
+          // Offset for gesture location.
+          center.y = location.y;
+          snapshot.center = center;
+          snapshot.transform = CGAffineTransformMakeScale(1.05, 1.05);
+          snapshot.alpha = 0.98;
+          cell.alpha = 0.0;
+          
+        } completion:^(BOOL finished) {
+          
+          cell.hidden = YES;
+          
+        }];
+      }
+      break;
+    }
+      
+    case UIGestureRecognizerStateChanged: {
+      CGPoint center = snapshot.center;
+      center.y = location.y;
+      snapshot.center = center;
+      
+      // Is destination valid and is it different from source?
+      if (indexPath && ![indexPath isEqual:sourceIndexPath]) {
+        
+        // ... update data source.
+        [self.arrayCells exchangeObjectAtIndex:indexPath.row withObjectAtIndex:sourceIndexPath.row];
+        
+        // ... move the rows.
+        [self.myTableView moveRowAtIndexPath:sourceIndexPath toIndexPath:indexPath];
+        
+        // ... and update source so it is in sync with UI changes.
+        sourceIndexPath = indexPath;
+      }
+      break;
+    }
+      
+    default: {
+      // Clean up.
+      UITableViewCell *cell = [self.myTableView cellForRowAtIndexPath:sourceIndexPath];
+      cell.hidden = NO;
+      cell.alpha = 0.0;
+      
+      [UIView animateWithDuration:0.25 animations:^{
+        
+        snapshot.center = cell.center;
+        snapshot.transform = CGAffineTransformIdentity;
+        snapshot.alpha = 0.0;
+        cell.alpha = 1.0;
+        
+      } completion:^(BOOL finished) {
+        
+        sourceIndexPath = nil;
+        [snapshot removeFromSuperview];
+        snapshot = nil;
+        
+      }];
+      
+      break;
+    }
+  }
+  [self.arrayCells writeToFile:[self packagePlist_Path] atomically:YES];
+}
+
+/** @brief Returns a customized snapshot of a given view. */
+- (UIView *)customSnapshoFromView:(UIView *)inputView {
+  
+  // Make an image from the input view.
+  UIGraphicsBeginImageContextWithOptions(inputView.bounds.size, NO, 0);
+  [inputView.layer renderInContext:UIGraphicsGetCurrentContext()];
+  UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+    
+  // Create an image view.
+  UIView *snapshot = [[UIImageView alloc] initWithImage:image];
+  snapshot.layer.masksToBounds = NO;
+  snapshot.layer.cornerRadius = 0.0;
+  snapshot.layer.shadowOffset = CGSizeMake(-5.0, 0.0);
+  snapshot.layer.shadowRadius = 5.0;
+  snapshot.layer.shadowOpacity = 0.4;
+  
+  return snapshot;
+}
 
 - (void)hudWasHidden:(MBProgressHUD *)hud {
 	// Remove HUD from screen when the HUD was hidded
@@ -584,6 +700,7 @@ SearchController *selfOrig;
         cell = [[%c(PackageCell) alloc] init];
 
     Package *package = [globalDatabase packageWithName:[self.arrayCells objectAtIndex:indexPath.row]];
+    cell.showsReorderControl = YES;
     [cell setPackage:package asSummary:[self isSummarized]];
     return cell;
 }
@@ -596,6 +713,37 @@ SearchController *selfOrig;
     [self didSelectPackage:package];
     
 }
+
+-(BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    return YES;
+
+}
+
+-(void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (editingStyle == UITableViewCellEditingStyleDelete) {
+            //remove our NSMutableArray
+        [self.arrayCells removeObjectAtIndex:indexPath.row];
+        [self.arrayCells writeToFile:[self packagePlist_Path] atomically:YES];
+            //remove from our tableView
+        [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+    }
+
+
+}
+
+// - (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath
+// {
+//     return YES;
+// }
+
+// - (void)tableView:(UITableView *)tableView moveRowAtIndexPath:(NSIndexPath *)fromIndexPath toIndexPath:(NSIndexPath *)toIndexPath 
+// {
+//     Package *package = [globalDatabase packageWithName:[self.arrayCells objectAtIndex:fromIndexPath.row]];
+//     [self.arrayCells removeObject:package.id];
+//     [self.arrayCells insertObject:package.id atIndex:toIndexPath.row];
+//     [self.arrayCells writeToFile:[self packagePlist_Path] atomically:YES];
+// }
 
 - (void)addNewPackageForFav {
 
