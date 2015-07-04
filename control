@@ -1,0 +1,9 @@
+Package: com.imokhles.favoritetweaks
+Name: FavoriteTweaks
+Depends: mobilesubstrate
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: Put your favourites tweaks in one place.
+Maintainer: iMokhles
+Author: iMokhles
+Section: Tweaks
