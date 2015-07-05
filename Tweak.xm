@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <substrate.h>
 #import "MBProgressHUD.h"
+#import "UIActionSheet+Blocks.h"
 
 static inline NSString *UCLocalizeEx(NSString *key, NSString *value = nil) {
     return [[NSBundle mainBundle] localizedStringForKey:key value:value table:nil];
@@ -228,7 +229,28 @@ typedef void(^finishedWithPackage)(Package *package);
 
 @interface Cydia : UIApplication
 - (void) loadData;
-- (void) reloadDataWithInvocation:(NSInvocation *)invocation; // private :P
+- (void) returnToCydia;
+- (void) saveState;
+- (void) retainNetworkActivityIndicator;
+- (void) releaseNetworkActivityIndicator;
+- (void) clearPackage:(Package *)package;
+- (void) installPackage:(Package *)package;
+- (void) installPackages:(NSArray *)packages;
+- (void) removePackage:(Package *)package;
+- (void) beginUpdate;
+- (BOOL) updating;
+- (bool) requestUpdate;
+- (void) distUpgrade;
+- (void) loadData;
+- (void) updateData;
+- (void) _saveConfig;
+- (void) syncData;
+- (void) addSource:(NSDictionary *)source;
+- (void) addTrivialSource:(NSString *)href;
+- (UIProgressHUD *) addProgressHUD;
+- (void) removeProgressHUD:(UIProgressHUD *)hud;
+- (void) showActionSheet:(UIActionSheet *)sheet fromItem:(UIBarButtonItem *)item;
+- (void) reloadDataWithInvocation:(NSInvocation *)invocation;
 @end
 
 /* Cydia NSString Additions {{{ */
@@ -433,7 +455,7 @@ SearchController *selfOrig;
 }
 %end
 
-@interface CyFavoritesTweaksTableViewController : UIViewController <UIAlertViewDelegate, UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate, MBProgressHUDDelegate> {
+@interface CyFavoritesTweaksTableViewController : UIViewController <UIActionSheetDelegate, UIAlertViewDelegate, UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate, MBProgressHUDDelegate> {
 	unsigned era_;
 	MBProgressHUD *HUD;
 }
@@ -732,6 +754,70 @@ SearchController *selfOrig;
 
 }
 
+- (NSArray *)tableView:(UITableView *)tableView editActionsForRowAtIndexPath:(NSIndexPath *)indexPath {
+
+	Package *package = [globalDatabase packageWithName:[self.arrayCells objectAtIndex:indexPath.row]];
+	NSString *moreString;
+	if (![package uninstalled]) {
+        moreString = UCLocalize("MODIFY");
+    } else {
+    	moreString = UCLocalize("INSTALL");
+    }
+
+    UITableViewRowAction *moreAction = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleDefault title:moreString handler:^(UITableViewRowAction *action, NSIndexPath *indexPath){
+        // maybe show an action sheet with more options
+
+        Package *package = [globalDatabase packageWithName:[self.arrayCells objectAtIndex:indexPath.row]];
+
+        UIActionSheet *sheet = [[UIActionSheet alloc]
+            initWithTitle:nil
+            delegate:self
+            cancelButtonTitle:nil // UCLocalize("CANCEL")
+            destructiveButtonTitle:nil // UCLocalize("REMOVE")
+            otherButtonTitles:nil
+        ];
+        [sheet setTag:indexPath.row];
+
+        if (![package uninstalled]) {
+        	[sheet addButtonWithTitle:UCLocalize("CANCEL")];
+        	[sheet addButtonWithTitle:UCLocalize("REMOVE")];
+        	[sheet addButtonWithTitle:UCLocalize("REINSTALL")];
+        	[sheet addButtonWithTitle:UCLocalize("UPGRADE")];
+        	[sheet setCancelButtonIndex:0];
+        	[sheet setDestructiveButtonIndex:1];
+	        [cyAppDelegate showActionSheet:sheet fromItem:nil];
+        } else {
+        	[cyAppDelegate installPackage:package];
+        }
+        [self.myTableView setEditing:NO];
+    }];
+    moreAction.backgroundColor = [UIColor lightGrayColor];
+    UITableViewRowAction *deleteAction = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleDestructive title:@"Delete"  handler:^(UITableViewRowAction *action, NSIndexPath *indexPath){
+        [self.arrayCells removeObjectAtIndex:indexPath.row];
+        [self.arrayCells writeToFile:[self packagePlist_Path] atomically:YES];
+            //remove from our tableView
+        [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+    }];
+    
+    return @[deleteAction, moreAction];
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet didDismissWithButtonIndex:(NSInteger)buttonIndex {
+	NSString *buttonTitle = [actionSheet buttonTitleAtIndex:buttonIndex];
+	Package *package = [globalDatabase packageWithName:[self.arrayCells objectAtIndex:actionSheet.tag]];
+
+	if  ([buttonTitle isEqualToString:UCLocalize("CANCEL")]) {
+	}
+	if ([buttonTitle isEqualToString:UCLocalize("REMOVE")]) {
+		[cyAppDelegate removePackage:package];
+	}
+	if ([buttonTitle isEqualToString:UCLocalize("REINSTALL")]) {
+		[cyAppDelegate installPackage:package];
+	}
+	if ([buttonTitle isEqualToString:UCLocalize("UPGRADE")]) {
+		[cyAppDelegate installPackage:package];
+	}
+}
 // - (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath
 // {
 //     return YES;
